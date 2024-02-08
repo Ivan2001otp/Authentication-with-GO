@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"golang-org/x/crypto/bcrypt"
 	"log"
 	"net/http"
@@ -12,9 +13,11 @@ import (
 	"github.com/Ivan2001otp/Authentication-with-GO/helpers"
 	"github.com/Ivan2001otp/Authentication-with-GO/models"
 	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
 
 	"github.com/go-playground/validator/v10"
 	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 );
 
@@ -59,19 +62,77 @@ func SignUp() gin.HandlerFunc{
 		if err!=nil{
 			log.Panic(err);
 			c.JSON(http.StatusInternalServerError,gin.H{"error":"error occured while checking for the phone number."});
-
 		}
 
 		if count>0{
 			c.JSON(http.StatusInternalServerError,gin.H{"error":"This email or phone number already exists."});
 			
 		}
+
+		user.Created_at ,_ = time.Parse(time.RFC3339,time.Now().Format(time.RFC3339));
+		user.Updated_at,_ = time.Parse(time.RFC3339,time.Now().Format(time.RFC3339));
+
+		user.ID = primitive.NewObjectID()
+		user.User_id = user.ID.Hex();
+
+	  token,refreshToken,_ :=	helpers.GenerateAllTokens(*user.Email,*user.First_name,*user.Last_name,*user.User_type,*&user.User_id);
+	  user.Token = &token;
+	  user.Refresh_token = &refreshToken;
+
+	  resultInsertionNumber,insertErr := userCollection.InsertOne(ctx,user);
+
+
+	  if(insertErr!=nil){
+		msg := fmt.Sprintf("User item was not created");
+		c.JSON(http.StatusInternalServerError,gin.H{"error":msg});
+		return;
+	  }
+
+	  defer cancel();
+	  c.JSON(http.StatusOK,resultInsertionNumber);
 	}
 }
 
-func Login()
+func Login() gin.HandlerFunc{
+	return func( c *gin.Context){
+	  var ctx,cancel =	context.WithTimeout(context.Background(),100 * time.Second);
+		
+	  var user models.User;
 
-func VerifyPassword()
+	  var foundUser models.User;
+
+	  if err :=c.BindJSON(&user);err!=nil{
+		c.JSON(http.StatusBadRequest,gin.H{"error":err.Error()});
+		return;
+	  }
+
+	  err := userCollection.FindOne(ctx,bson.M{"email":user.Email}).Decode(&foundUser);
+	  
+	  defer cancel();
+
+	  if err != nil{
+		c.JSON(http.StatusInternalServerError,gin.H{"error":"email or password is incorrect."});
+		return;
+	  }
+
+	  passValid,msg := VerifyPassword(*user.Password,*foundUser.Password)
+	  defer cancel();
+	}
+}
+
+func VerifyPassword(userPassword string,providedPassword string) (bool,string){
+	err := bcrypt.CompareHashAndPassword([] byte(providedPassword),[]byte (userPassword));
+	check := true;
+
+	msg := "";
+
+	if err!=nil{
+		msg = fmt.Sprint("email of password is incorrect!");
+		check = false;
+	}
+
+	return check,msg;
+}
 
 func GetUser() gin.HandlerFunc{
 	return func(c *gin.Context){
